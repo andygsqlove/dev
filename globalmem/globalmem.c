@@ -25,12 +25,15 @@ struct globalmem_dev
 	unsigned char mem[MEM_SIZE];
 };
 
-static struct globalmem_dev *dev;
+static struct globalmem_dev *globalmem_devp;
 static int major = 0;//MEM_MAJOR;
 //static struct cdev;
 
 static int globalmem_open(struct inode * inodep,struct file * filp)
 {
+	struct globalmem_dev *dev;
+
+	dev = container_of(inodep->i_cdev, struct globalmem_dev, cdev);
 	filp->private_data = dev;
 	return 0;
 }
@@ -101,11 +104,11 @@ static loff_t globalmem_llseek(struct file * filp, loff_t offset, int orig)
 				ret = -EINVAL;
 				break;
 			}
-			//if((unsigned int)offset >= MEM_SIZE)
-			//{
-			//	ret = -EINVAL;
-			//	break;
-			//}
+			if((unsigned int)offset >= MEM_SIZE)
+			{
+				ret = -EINVAL;
+				break;
+			}
 			
 			filp->f_pos = (unsigned)offset;
 			ret = filp->f_pos;
@@ -157,13 +160,14 @@ static const struct file_operations memopt = {
 	.ioctl=globalmem_ioctl,
 	.open=globalmem_open,
 	.release=globalmem_release,
+	.llseek=globalmem_llseek,
 };
 
 
-static void memchr_getup(struct globalmem_dev *dev)
+static void memchr_getup(struct globalmem_dev *dev,unsigned int in)
 {
 	int err;
-	dev_t devno = MKDEV(major, 0);
+	dev_t devno = MKDEV(major, in);
 	cdev_init(&dev->cdev, &memopt);
 	dev->cdev.owner = THIS_MODULE;
 	dev->cdev.ops = &memopt;
@@ -189,14 +193,16 @@ static int __init globalmem_init(void)
 
 	if(err < 0)
 		return -1;
-	dev = kmalloc(sizeof(struct globalmem_dev),GFP_KERNEL);
-	printk("addr = %lu\n",dev);
-	if(!dev)
+	globalmem_devp = kmalloc(2*sizeof(struct globalmem_dev),GFP_KERNEL);
+	memset(globalmem_devp,0,2*sizeof(struct globalmem_dev));
+	printk("addr = %lu\n",globalmem_devp);
+	if(!globalmem_devp)
 	{
 		err = -EINVAL;
 		goto fail_malloc;
 	}
-	memchr_getup(dev);
+	memchr_getup(&globalmem_devp[0],0);
+	memchr_getup(&globalmem_devp[1],1);
 
 	return 0;
 	
@@ -206,8 +212,9 @@ static int __init globalmem_init(void)
 
 static void __exit globalmem_exit(void)
 {
-	cdev_del(&dev->cdev);
-	kfree(dev);
+	cdev_del(&(globalmem_devp[0].cdev));
+	cdev_del(&(globalmem_devp[1].cdev));
+	kfree(globalmem_devp);
 	unregister_chrdev_region(MKDEV(major,0), 1);
 }
 
